@@ -1,7 +1,9 @@
 import inspect
 from dataclasses import dataclass
+from typing import Any
 
 import mlx.core as mx
+
 
 def create_additive_causal_mask(N: int, offset: int = 0):
     rinds = mx.arange(offset + N)
@@ -9,8 +11,8 @@ def create_additive_causal_mask(N: int, offset: int = 0):
     mask = linds[:, None] < rinds[None]
     return mask * -1e9
 
-class BatchedKVCache:
 
+class BatchedKVCache:
     def __init__(self, head_dim, n_kv_heads, batch_size=1):
         self.n_kv_heads = n_kv_heads
         self.head_dim = head_dim
@@ -24,7 +26,12 @@ class BatchedKVCache:
         prev = self.offset
         if self.keys is None or (prev + keys.shape[2]) > self.keys.shape[2]:
             n_steps = (self.step + keys.shape[2] - 1) // self.step
-            shape = (self.batch_size, self.n_kv_heads, n_steps * self.step, self.head_dim)
+            shape = (
+                self.batch_size,
+                self.n_kv_heads,
+                n_steps * self.step,
+                self.head_dim,
+            )
             new_k = mx.zeros(shape, keys.dtype)
             new_v = mx.zeros(shape, values.dtype)
             if self.keys is not None:
@@ -41,6 +48,7 @@ class BatchedKVCache:
         self.values[..., prev : self.offset, :] = values
         return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]
 
+
 @dataclass
 class BaseModelArgs:
     @classmethod
@@ -52,3 +60,28 @@ class BaseModelArgs:
                 if k in inspect.signature(cls).parameters
             }
         )
+
+
+def create_additive_causal_mask(N: int, offset: int = 0):
+    rinds = mx.arange(offset + N)
+    linds = mx.arange(offset, offset + N) if offset else rinds
+    mask = linds[:, None] < rinds[None]
+    return mask * -1e9
+
+
+def create_attention_mask(h: mx.array, cache: Any = None):
+    T = h.shape[1]
+    if T > 1:
+        if cache is not None and cache[0] is not None:
+            c = cache[0]
+            if False: # isinstance(c, RotatingKVCache):
+                offset = min(c.max_size - 1, c.offset)
+            else:
+                offset = c.offset
+        else:
+            offset = 0
+        mask = create_additive_causal_mask(T, offset)
+        mask = mask.astype(h.dtype)
+    else:
+        mask = None
+    return mask
